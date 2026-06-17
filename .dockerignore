@@ -1,0 +1,39 @@
+# Docker build context 忽略项（build context = 项目根目录）
+# 避免把巨大/无关目录塞进镜像构建，加速且防泄漏。
+
+# 依赖与构建产物（镜像内会重新装/构建）
+frontend/node_modules
+frontend/dist
+.venv
+backend/.venv
+**/__pycache__
+**/*.pyc
+
+# 版本控制 / 编辑器 / 系统
+.git
+.gitignore
+.obsidian
+.claude
+**/.DS_Store
+
+# 本地数据与密钥（不应进镜像）
+backend/.env
+deploy/docker/.env
+backend/outputs/*
+backend/temp/*
+backend/media/*
+backend/bgm/*
+backend/voices/*
+backend/avatars/*
+
+# 文档 / 演示资料（与运行无关，体积大）
+*.md
+pitch-deck*.html
+screenshots
+*.jpg
+*.png
+deploy/docker/*.tar
+
+# 测试缓存
+.pytest_cache
+**/.pytest_cache

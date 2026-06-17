@@ -1,0 +1,41 @@
+# ── Eidon 后端镜像（FastAPI + Whisper + ffmpeg）─────────────────────────────
+# 单进程 uvicorn（task_manager 是进程内单例，禁止 --workers N）。
+# 构建：
+#   docker build -f deploy/docker/Dockerfile.backend -t eidon-backend .
+#   docker build -f deploy/docker/Dockerfile.backend --build-arg CN=1 -t eidon-backend .  # 国内镜像
+# 注意：build context 是【项目根目录】（因为要 COPY backend/）。
+FROM python:3.10-slim
+
+# CN=1 时把 apt / pip 切到国内镜像，构建快很多
+ARG CN=0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 系统依赖：ffmpeg(带 libass 用于烧字幕) + Noto CJK 中文字体 + 给 yt-dlp/whisper 用的基础工具
+RUN if [ "$CN" = "1" ]; then \
+      sed -i 's#deb.debian.org#mirrors.tuna.tsinghua.edu.cn#g; s#security.debian.org#mirrors.tuna.tsinghua.edu.cn#g' \
+        /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list 2>/dev/null || true; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg \
+      fonts-noto-cjk \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 先装依赖（利用层缓存：requirements 不变就不重装）
+COPY backend/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip $( [ "$CN" = "1" ] && echo "-i https://pypi.tuna.tsinghua.edu.cn/simple" ) \
+    && pip install --no-cache-dir $( [ "$CN" = "1" ] && echo "-i https://pypi.tuna.tsinghua.edu.cn/simple" ) -r /app/requirements.txt
+
+# 再拷后端代码
+COPY backend/ /app/
+
+# 字幕字体默认用 Linux 的 Noto CJK（compose 的 .env 也会覆盖）
+ENV SUBTITLE_FONT="Noto Sans CJK SC"
+# openai-whisper 默认把模型下到 ~/.cache/whisper（root 即 /root/.cache/whisper），
+# compose 把该目录挂成 volume，避免重建容器时重下模型。
+
+EXPOSE 8000
+# 单进程；host 0.0.0.0 让容器外可达
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
