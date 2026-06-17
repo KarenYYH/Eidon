@@ -49,7 +49,11 @@ want() { [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; }
 if [ "$(id -u)" -eq 0 ]; then
   die "请用普通用户跑（不要 sudo bash）。脚本会在需要时自己调 sudo。"
 fi
-sudo -v || die "需要 sudo 权限。"
+# 用非交互探测 sudo（sudo -v 在无 tty / sudo -u 切换出来的环境会挂起等待，即便配了免密码）。
+# sudo -n true：能免密码就立即通过；需要密码或无权限则立即失败，绝不阻塞。
+if ! sudo -n true 2>/dev/null; then
+  die "无法免密码 sudo。请在能交互的终端先跑一次「sudo -v」缓存凭证，或为该用户配置 NOPASSWD 后重试。"
+fi
 
 # ── 阶段 0：环境自检 ─────────────────────────────────────────────────────────
 if want preflight; then
