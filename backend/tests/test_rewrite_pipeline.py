@@ -78,3 +78,47 @@ async def test_rewrite_extracts_plain_text(tmp_path):
     )
     text = pl._srt_to_plain_text(str(srt))
     assert text == "第一句 第二句"
+
+
+async def test_rewrite_stock_video_spawns_stock_children(monkeypatch, tmp_path):
+    """output_kind=stock_video → children are STOCK_VIDEO jobs carrying scenes,
+    no avatar needed."""
+    from core import config
+    monkeypatch.setattr(config.settings, "TEMP_DIR", str(tmp_path / "temp"))
+
+    async def fake_download(source, job_id):
+        v = tmp_path / f"{job_id}.mp4"; v.write_bytes(b"v"); return str(v)
+
+    async def fake_transcribe(video_path, job_id, model):
+        srt = tmp_path / f"{job_id}.srt"
+        srt.write_text("1\n00:00:00,000 --> 00:00:02,000\n原始\n", encoding="utf-8")
+        return str(srt)
+
+    async def fake_rewrite_scenes(text, count, style, language):
+        return [[{"narration": f"稿{i+1}", "duration": 5, "visual_keywords": ["city"]}]
+                for i in range(count)]
+
+    monkeypatch.setattr("services.downloader.downloader.download_video", fake_download)
+    monkeypatch.setattr("services.transcriber.whisper_stt.transcribe", fake_transcribe)
+    monkeypatch.setattr("services.script.rewriter.rewrite_scripts_with_scenes", fake_rewrite_scenes)
+
+    tm = TaskManager()
+    parent = Job(
+        title="洗稿", mode=JobMode.REWRITE, source_url="http://x/v.mp4",
+        script_count=2, output_kind="stock_video", script_language="zh",
+        bgm_enabled=True, video_aspect="9:16",
+    )
+    tm.create_job(parent)
+    await pl.run_pipeline(parent, tm)
+
+    assert len(parent.child_ids) == 2
+    assert len(parent.script_scenes) == 2
+    for cid in parent.child_ids:
+        child = tm.get_job(cid)
+        assert child is not None
+        assert child.mode == JobMode.STOCK_VIDEO
+        assert child.parent_id == parent.id
+        assert child.scenes and child.scenes[0]["visual_keywords"] == ["city"]
+        assert child.avatar_video is None       # no face needed
+        assert child.bgm_enabled is True
+        assert child.video_aspect == "9:16"

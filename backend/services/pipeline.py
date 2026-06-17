@@ -9,6 +9,8 @@ async def run_pipeline(job: Job, tm: TaskManager):
         await _run_create_pipeline(job, tm)
     elif job.mode == JobMode.DIGITAL_HUMAN:
         await _run_digital_human_pipeline(job, tm)
+    elif job.mode == JobMode.STOCK_VIDEO:
+        await _run_stock_video_pipeline(job, tm)
     elif job.mode == JobMode.REWRITE:
         await _run_rewrite_pipeline(job, tm)
     else:
@@ -220,6 +222,63 @@ async def _run_digital_human_pipeline(job: Job, tm: TaskManager):
     await _maybe_publish(job, tm)
 
 
+# ── Stock-video pipeline (rewrite → narration + online stock footage, no GPU) ──
+
+async def _run_stock_video_pipeline(job: Job, tm: TaskManager):
+    """A single rewritten script (job.scenes already set) → TTS → assemble scenes
+    from online stock footage → mix (burn subtitles, optional BGM) → optional publish.
+    Reuses create-mode's scene assembler + mixer; no avatar/HeyGem/GPU needed."""
+    from services.tts.tts_service import synthesize_tts_from_text
+    from services.script.scene_assembler import assemble_scenes
+    from services.synthesizer.ffmpeg_mix import mix_assembled, mix_with_bgm
+
+    steps = [JobStep.TTS, JobStep.ASSEMBLE, JobStep.SYNTHESIZE]
+    for s in steps:
+        job.steps.append(StepStatus(step=s))
+
+    if not job.scenes:
+        # Degrade: a single scene from the plain text
+        job.scenes = [{"narration": job.text, "duration": 0, "visual_keywords": []}]
+
+    await tm.update_step(job, JobStep.TTS, JobStatus.RUNNING, 0, "Synthesizing narration…")
+    try:
+        full_narration = "\n".join(s.get("narration", "") for s in job.scenes)
+        audio_path = await synthesize_tts_from_text(
+            full_narration, job.scenes, job.id, job.tts_provider, job.voice,
+            job.prompt_audio or "", job.prompt_text or "",
+        )
+        job.audio_file = audio_path
+        await tm.update_step(job, JobStep.TTS, JobStatus.COMPLETED, 100, "Narration ready")
+    except Exception as e:
+        await tm.update_step(job, JobStep.TTS, JobStatus.FAILED, 0, str(e), str(e)); raise
+
+    await tm.update_step(job, JobStep.ASSEMBLE, JobStatus.RUNNING, 0, "Assembling scenes…")
+    try:
+        assembled_path = await assemble_scenes(
+            job.scenes, audio_path, job.id,
+            aspect=job.video_aspect, concat_mode=job.video_concat_mode,
+            clip_duration=job.clip_duration, transition=job.transition,
+        )
+        await tm.update_step(job, JobStep.ASSEMBLE, JobStatus.COMPLETED, 100, "Scenes assembled")
+    except Exception as e:
+        await tm.update_step(job, JobStep.ASSEMBLE, JobStatus.FAILED, 0, str(e), str(e)); raise
+
+    await tm.update_step(job, JobStep.SYNTHESIZE, JobStatus.RUNNING, 0, "Mixing final video…")
+    try:
+        output_path = await mix_assembled(assembled_path, audio_path, job.id)
+        if job.bgm_enabled:
+            from services.media.local_library import get_random_bgm
+            bgm = get_random_bgm()
+            if bgm:
+                output_path = await mix_with_bgm(output_path, bgm, job.id, job.bgm_volume_db)
+        job.output_file = output_path
+        await tm.update_step(job, JobStep.SYNTHESIZE, JobStatus.COMPLETED, 100, "Video ready")
+    except Exception as e:
+        await tm.update_step(job, JobStep.SYNTHESIZE, JobStatus.FAILED, 0, str(e), str(e)); raise
+
+    await _maybe_publish(job, tm)
+
+
 # ── Rewrite (batch) pipeline ────────────────────────────────────────────────────
 
 def _srt_to_plain_text(srt_path: str) -> str:
@@ -244,8 +303,10 @@ async def _run_rewrite_pipeline(job: Job, tm: TaskManager):
     """
     from services.downloader.downloader import download_video
     from services.transcriber.whisper_stt import transcribe
-    from services.script.rewriter import rewrite_scripts
+    from services.script.rewriter import rewrite_scripts, rewrite_scripts_with_scenes
     from core.config import settings
+
+    is_stock = job.output_kind == "stock_video"
 
     steps = [JobStep.DOWNLOAD, JobStep.TRANSCRIBE, JobStep.REWRITE, JobStep.DISPATCH]
     for s in steps:
@@ -270,40 +331,70 @@ async def _run_rewrite_pipeline(job: Job, tm: TaskManager):
     except Exception as e:
         await tm.update_step(job, JobStep.TRANSCRIBE, JobStatus.FAILED, 0, str(e), str(e)); raise
 
-    # 3) Rewrite into N fresh scripts
+    # 3) Rewrite into N fresh scripts (stock_video also gets per-script visual scenes)
     await tm.update_step(job, JobStep.REWRITE, JobStatus.RUNNING, 0,
                          f"Rewriting into {job.script_count} scripts…")
     try:
-        scripts = await rewrite_scripts(
-            original_text, job.script_count, job.rewrite_style, job.script_language,
-        )
-        job.scripts = scripts
+        if is_stock:
+            script_scenes = await rewrite_scripts_with_scenes(
+                original_text, job.script_count, job.rewrite_style, job.script_language,
+            )
+            job.script_scenes = script_scenes
+            # Keep a plain-text view too (for the detail page preview)
+            job.scripts = [" ".join(s.get("narration", "") for s in scenes)
+                           for scenes in script_scenes]
+            n = len(script_scenes)
+        else:
+            scripts = await rewrite_scripts(
+                original_text, job.script_count, job.rewrite_style, job.script_language,
+            )
+            job.scripts = scripts
+            n = len(scripts)
         await tm.update_step(job, JobStep.REWRITE, JobStatus.COMPLETED, 100,
-                             f"{len(scripts)} scripts ready")
+                             f"{n} scripts ready")
     except Exception as e:
         await tm.update_step(job, JobStep.REWRITE, JobStatus.FAILED, 0, str(e), str(e)); raise
 
-    # 4) Spawn one digital-human child job per script
-    await tm.update_step(job, JobStep.DISPATCH, JobStatus.RUNNING, 0, "Dispatching digital-human jobs…")
+    # 4) Spawn one child job per script (digital_human or stock_video by output_kind)
+    label = "stock-video" if is_stock else "digital-human"
+    await tm.update_step(job, JobStep.DISPATCH, JobStatus.RUNNING, 0, f"Dispatching {label} jobs…")
     try:
         child_ids = []
-        for i, script in enumerate(job.scripts):
-            child = Job(
-                title=f"{job.title or 'Rewrite'} #{i + 1}",
-                mode=JobMode.DIGITAL_HUMAN,
-                text=script,
-                avatar_video=job.avatar_video,
-                tts_provider=job.tts_provider,
-                voice=job.voice,
-                prompt_audio=job.prompt_audio,
-                prompt_text=job.prompt_text,
-                script_language=job.script_language,
-                parent_id=job.id,
-            )
+        count = len(job.script_scenes) if is_stock else len(job.scripts)
+        for i in range(count):
+            if is_stock:
+                child = Job(
+                    title=f"{job.title or 'Rewrite'} #{i + 1}",
+                    mode=JobMode.STOCK_VIDEO,
+                    scenes=job.script_scenes[i],
+                    text=job.scripts[i] if i < len(job.scripts) else "",
+                    tts_provider=job.tts_provider,
+                    voice=job.voice,
+                    prompt_audio=job.prompt_audio,
+                    prompt_text=job.prompt_text,
+                    script_language=job.script_language,
+                    video_aspect=job.video_aspect,
+                    bgm_enabled=job.bgm_enabled,
+                    bgm_volume_db=job.bgm_volume_db,
+                    parent_id=job.id,
+                )
+            else:
+                child = Job(
+                    title=f"{job.title or 'Rewrite'} #{i + 1}",
+                    mode=JobMode.DIGITAL_HUMAN,
+                    text=job.scripts[i],
+                    avatar_video=job.avatar_video,
+                    tts_provider=job.tts_provider,
+                    voice=job.voice,
+                    prompt_audio=job.prompt_audio,
+                    prompt_text=job.prompt_text,
+                    script_language=job.script_language,
+                    parent_id=job.id,
+                )
             await tm.submit(child)
             child_ids.append(child.id)
         job.child_ids = child_ids
         await tm.update_step(job, JobStep.DISPATCH, JobStatus.COMPLETED, 100,
-                             f"Dispatched {len(child_ids)} digital-human jobs")
+                             f"Dispatched {len(child_ids)} {label} jobs")
     except Exception as e:
         await tm.update_step(job, JobStep.DISPATCH, JobStatus.FAILED, 0, str(e), str(e)); raise

@@ -31,7 +31,8 @@ class JobMode(str, Enum):
     TRANSLATE = "translate"            # download → transcribe → translate → tts → mix
     CREATE = "create"                 # topic → script → tts → assemble → mix
     DIGITAL_HUMAN = "digital_human"   # text/audio → tts → lipsync (talking-head avatar)
-    REWRITE = "rewrite"               # url → transcribe → rewrite×N → spawn N digital_human children
+    REWRITE = "rewrite"               # url → transcribe → rewrite×N → spawn N children
+    STOCK_VIDEO = "stock_video"       # script(+scenes) → tts → stock-footage assemble → mix
 
 
 class StepStatus(BaseModel):
@@ -67,10 +68,17 @@ class Job(BaseModel):
     prompt_audio: Optional[str] = None      # reference voice sample (wav)
     prompt_text: Optional[str] = None       # transcript of the reference sample
 
-    # Rewrite (batch) mode — url → transcribe → rewrite into N scripts → N digital-human children
+    # Rewrite (batch) mode — url → transcribe → rewrite into N scripts → N children
     script_count: int = 3                   # how many rewritten scripts to produce
     rewrite_style: str = ""                 # free-text style/angle instruction for the rewrite
     scripts: List[str] = []                 # the N rewritten narration scripts
+    # Per-script visual scenes (for stock_video output): one scene-list per script,
+    # each scene = {narration, duration, visual_keywords}. Parallel to `scripts`.
+    script_scenes: List[List[dict]] = []
+    # How rewritten scripts become videos:
+    #   "digital_human" → HeyGem talking-head (needs avatar_video + GPU)
+    #   "stock_video"   → TTS + online stock footage + burned subtitles (no GPU)
+    output_kind: str = "digital_human"
     parent_id: Optional[str] = None         # set on child jobs, points to the rewrite parent
     child_ids: List[str] = []               # set on the parent, lists spawned child job ids
 

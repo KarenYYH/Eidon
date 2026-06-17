@@ -26,6 +26,7 @@ class CreateJobRequest(BaseModel):
     # Rewrite (batch) mode
     script_count: int = 3
     rewrite_style: Optional[str] = None
+    output_kind: str = "digital_human"   # digital_human | stock_video
     # Common
     tts_provider: str = "edge"
     voice: str = ""
@@ -83,14 +84,16 @@ async def create_job(req: CreateJobRequest):
     elif req.mode == "rewrite":
         if not req.source_url:
             raise HTTPException(400, "source_url is required for rewrite mode")
-        if not req.avatar_video:
-            raise HTTPException(400, "avatar_video is required for rewrite mode")
+        # Digital-human output needs a face video; stock-video output does not.
+        if req.output_kind != "stock_video" and not req.avatar_video:
+            raise HTTPException(400, "avatar_video is required for digital_human output")
         job = Job(
             mode=JobMode.REWRITE,
             source_url=req.source_url,
             script_count=req.script_count,
             rewrite_style=req.rewrite_style or "",
             script_language=req.script_language,
+            output_kind=req.output_kind,
             avatar_video=req.avatar_video,
             tts_provider=req.tts_provider,
             voice=req.voice,

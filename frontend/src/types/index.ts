@@ -1,6 +1,6 @@
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type JobStep = 'download' | 'transcribe' | 'translate' | 'tts' | 'synthesize' | 'script' | 'rewrite' | 'assemble' | 'lipsync' | 'dispatch' | 'publish'
-export type JobMode = 'translate' | 'create' | 'digital_human' | 'rewrite'
+export type JobMode = 'translate' | 'create' | 'digital_human' | 'rewrite' | 'stock_video'
 
 export interface StepStatus {
   step: JobStep
@@ -115,4 +115,5 @@ export interface CreateJobPayload {
   prompt_text?: string
   script_count?: number
   rewrite_style?: string
+  output_kind?: string
 }

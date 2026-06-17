@@ -33,6 +33,41 @@ class TestParseScripts:
         assert len(out) == 1
 
 
+class TestParseScriptScenes:
+    def test_parses_scripts_with_scenes(self):
+        raw = ('{"scripts": [{"scenes": [{"narration": "hi", "duration": 5, '
+               '"visual_keywords": ["city", "night"]}]}]}')
+        out = rw._parse_script_scenes(raw, 3, 60)
+        assert len(out) == 1
+        assert out[0][0]["narration"] == "hi"
+        assert out[0][0]["duration"] == 5.0
+        assert out[0][0]["visual_keywords"] == ["city", "night"]
+
+    def test_coerces_string_keywords_to_list(self):
+        raw = '{"scripts": [{"scenes": [{"narration": "x", "visual_keywords": "beach"}]}]}'
+        out = rw._parse_script_scenes(raw, 3, 60)
+        assert out[0][0]["visual_keywords"] == ["beach"]
+
+    def test_truncates_to_count(self):
+        raw = ('{"scripts": [{"scenes":[{"narration":"a"}]},'
+               '{"scenes":[{"narration":"b"}]},{"scenes":[{"narration":"c"}]}]}')
+        out = rw._parse_script_scenes(raw, 2, 60)
+        assert len(out) == 2
+
+    def test_skips_scenes_without_narration(self):
+        raw = '{"scripts": [{"scenes": [{"duration": 5}, {"narration": "ok"}]}]}'
+        out = rw._parse_script_scenes(raw, 3, 60)
+        assert len(out[0]) == 1
+        assert out[0][0]["narration"] == "ok"
+
+    def test_fallback_to_plain_text_single_scene(self):
+        out = rw._parse_script_scenes("plain text no json", 2, 45)
+        assert len(out) == 1
+        assert out[0][0]["narration"] == "plain text no json"
+        assert out[0][0]["duration"] == 45.0
+        assert out[0][0]["visual_keywords"] == []
+
+
 class TestGuards:
     async def test_empty_text_raises(self, monkeypatch):
         monkeypatch.setattr(rw.settings, "LLM_API_KEY", "sk-x")

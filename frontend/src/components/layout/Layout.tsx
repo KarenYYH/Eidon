@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Plus, ListVideo, Film, Settings, Zap } from 'lucide-react'
+import { Plus, ListVideo, Film, Settings, Zap, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
 
 export function Layout() {
@@ -15,7 +15,8 @@ export function Layout() {
 
 function Sidebar() {
   const navItems = [
-    { to: '/', icon: Plus, label: '新建任务', end: true },
+    { to: '/', icon: Wand2, label: '一键洗稿', end: true },
+    { to: '/new', icon: Plus, label: '新建任务', end: false },
     { to: '/jobs', icon: ListVideo, label: '任务列表', end: false },
     { to: '/media', icon: Film, label: '素材库', end: false },
     { to: '/settings', icon: Settings, label: '设置', end: false },
