@@ -21,10 +21,10 @@
 ```powershell
 cd <项目所在目录>\Eidon\deploy
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\install-windows.ps1
+.\install-windows.ps1            # 国内网络强烈建议加 -Cn：.\install-windows.ps1 -Cn
 ```
 
-它会：检测系统/显卡 → 装 WSL2+Ubuntu →（首次需重启，**重启后自动续跑**）→ 把项目放进 WSL → 自动调用第 2 步的脚本。一路 `y` + 回车即可。不要声音克隆就加 `-SkipCosyvoice`。
+它会：检测系统/显卡 → 装 WSL2+Ubuntu →（首次需重启，**重启后自动续跑**）→ 把项目放进 WSL → 自动调用第 2 步的脚本。一路 `y` + 回车即可。不要声音克隆就加 `-SkipCosyvoice`，国内网络加 `-Cn`（两个可同时加）。
 
 **第 2 步（WSL 内）—— 后半段全自动**
 上面那个脚本会自动调它；你也可以单独在 WSL 里跑：
@@ -32,11 +32,20 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 ```bash
 cd ~/Eidon/deploy
 bash install-wsl-full.sh                 # 全装（Docker→Eidon→HeyGem→CosyVoice→自检）
+bash install-wsl-full.sh --cn            # 国内网络：apt/pip/conda/Docker 全走国内镜像，快数倍
 bash install-wsl-full.sh --skip-cosyvoice  # 不要声音克隆（TTS 用免费 edge）
 bash install-wsl-full.sh --only heygem     # 某阶段失败时单独重试
 ```
 
 它会：开 systemd → 装 Docker+NVIDIA Toolkit → 跑 `setup.sh` 部署 Eidon → 克隆并起 HeyGem（**自动注入容器卷映射，免手改 yml**）→ 引导 CosyVoice → 四件套自检。每阶段幂等可重跑，失败会告诉你卡在哪、贴哪条命令重试。
+
+### ⏱️ 安装为什么慢、怎么更快
+
+安装时间几乎全花在**下载几十 GB**，不是脚本本身慢：HeyGem 镜像约 30GB、CosyVoice 依赖(torch 等)+模型几 GB、Miniconda/pynini、Whisper 模型。所以提速的关键是下载源：
+
+- **国内网络务必加 `--cn`／`-Cn`**：一键把 apt / pip / conda / Docker registry / Miniconda 全切到国内镜像（清华、daocloud 等），这是缩短安装时间最有效的一招，通常能快数倍。
+- **HeyGem 那 30GB 是大头**：`--cn` 会配 Docker 镜像加速器；它在后台拉镜像时，Eidon 主程序（下载→转写→改写→免费 TTS→字幕）其实已经能用，可以先打开 `http://localhost/` 试前半段，数字人等镜像拉完再用。
+- **不需要声音克隆就 `--skip-cosyvoice`**：省掉 Miniconda + pynini + CosyVoice 依赖一整条（好几 GB + conda 编译）。
 
 > CosyVoice 的模型权重因为体积大（几个 G）不自动下载，脚本会在最后打印手动下载+启动命令（见第 4 步）。其余全自动。
 > 这两个脚本无法替你做的只有两件：**装 NVIDIA 驱动** 和 **`wsl --install` 后的那次重启**——其它都包了。

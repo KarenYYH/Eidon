@@ -55,11 +55,18 @@ echo "==> [1/6] 系统依赖完成"
 
 # 2) Python 虚拟环境 + 后端依赖
 echo "==> [2/6] 创建 venv 并安装后端依赖…"
+# 国内镜像（由 install-wsl-full.sh 透传 EIDON_CN=1，或手动 EIDON_CN=1 sudo bash setup.sh）
+PIP_I=""
+if [ "${EIDON_CN:-0}" = "1" ]; then
+  export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  PIP_I="-i https://pypi.tuna.tsinghua.edu.cn/simple"
+  echo "    pip 源 → 清华（EIDON_CN=1）"
+fi
 if [ ! -d "$VENV" ]; then
   python3 -m venv "$VENV"
 fi
-"$VENV/bin/pip" install --upgrade pip
-"$VENV/bin/pip" install -r "$BACKEND/requirements.txt"
+"$VENV/bin/pip" install $PIP_I --upgrade pip
+"$VENV/bin/pip" install $PIP_I -r "$BACKEND/requirements.txt"
 
 # 可选：GPU 加速 Whisper —— 安装 CUDA 版 torch 会显著加快转写。
 # 默认 requirements 装的是通用 torch；如需 GPU 版，取消下面注释并按显卡 CUDA 版本调整：
@@ -78,6 +85,10 @@ fi
 # 4) 构建前端静态文件
 echo "==> [4/6] 构建前端…"
 cd "$FRONTEND"
+if [ "${EIDON_CN:-0}" = "1" ]; then
+  sudo -u "$RUN_USER" npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+  echo "    npm 源 → npmmirror（EIDON_CN=1）"
+fi
 sudo -u "$RUN_USER" npm install
 sudo -u "$RUN_USER" npm run build
 echo "    前端产物: $FRONTEND/dist"

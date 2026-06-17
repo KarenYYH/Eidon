@@ -24,7 +24,8 @@ param(
   [string]$Distro   = "Ubuntu-22.04",
   [string]$RepoUrl  = "https://github.com/KarenYYH/Eidon.git",
   [switch]$Resume,                       # 内部用：重启后自启时带上
-  [switch]$SkipCosyvoice                 # 透传给 WSL 脚本：不装声音克隆
+  [switch]$SkipCosyvoice,                # 透传给 WSL 脚本：不装声音克隆
+  [switch]$Cn                            # 透传 --cn：国内镜像源，安装快数倍
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +48,7 @@ if (-not $admin) {
   $argline = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
   if ($Resume){ $argline += " -Resume" }
   if ($SkipCosyvoice){ $argline += " -SkipCosyvoice" }
+  if ($Cn){ $argline += " -Cn" }
   Start-Process powershell -Verb RunAs -ArgumentList $argline
   exit 0
 }
@@ -57,6 +59,7 @@ New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 function Register-Resume {
   $cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Resume"
   if ($SkipCosyvoice){ $cmd += " -SkipCosyvoice" }
+  if ($Cn){ $cmd += " -Cn" }
   Set-ItemProperty -Path $RunOnce -Name $Tag -Value $cmd
   '{"phase":"await-reboot"}' | Set-Content $StateFile
 }
@@ -162,11 +165,10 @@ Info "3/3 进入 WSL 跑后半段（Docker / Eidon / HeyGem / CosyVoice）"
 Write-Host ""
 Write-Host "──────── 以下为 WSL 内安装输出 ────────" -ForegroundColor Cyan
 # 参数作为独立 argv 传给 helper 的 run 子命令，不拼 shell 字符串
-if ($SkipCosyvoice) {
-  wsl.exe -d $Distro -- bash $Helper run "$wslProj" --skip-cosyvoice
-} else {
-  wsl.exe -d $Distro -- bash $Helper run "$wslProj"
-}
+$runArgs = @("run", "$wslProj")
+if ($Cn)           { $runArgs += "--cn" }
+if ($SkipCosyvoice){ $runArgs += "--skip-cosyvoice" }
+wsl.exe -d $Distro -- bash $Helper @runArgs
 $code = $LASTEXITCODE
 
 Remove-Item $StateFile -ErrorAction SilentlyContinue

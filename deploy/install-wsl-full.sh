@@ -9,8 +9,12 @@
 # 用法（在 WSL2 里）：
 #   cd ~/Eidon/deploy
 #   bash install-wsl-full.sh                 # 全装
+#   bash install-wsl-full.sh --cn            # 国内网络：apt/pip/conda/Docker 全走国内镜像，快数倍（强烈推荐）
 #   bash install-wsl-full.sh --skip-cosyvoice # 不要声音克隆（只 edge 免费 TTS）
 #   bash install-wsl-full.sh --only heygem    # 只跑某一阶段（debug/重试用）
+#
+# 安装慢几乎都是在下载几十 GB（HeyGem 镜像 ~30G、CosyVoice/torch、模型）。
+# 国内用户务必加 --cn —— 这是缩短安装时间最有效的一招。
 #
 # 幂等：可反复运行；每阶段会先检测是否已就绪再决定跳过。
 set -uo pipefail
@@ -33,10 +37,11 @@ HEYGEM_DIR="$HOME_DIR/Duix.Heygem"
 COSY_DIR="$HOME_DIR/CosyVoice"
 
 # ── 参数 ─────────────────────────────────────────────────────────────────────
-SKIP_COSY=0; ONLY=""
+SKIP_COSY=0; ONLY=""; CN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --skip-cosyvoice) SKIP_COSY=1 ;;
+    --cn) CN=1 ;;
     --only) ONLY="${2:-}"; shift ;;
     -h|--help) sed -n '2,/^set /{/^set /d;s/^#\{0,1\} \{0,1\}//;p;}' "$0"; exit 0 ;;
     *) die "未知参数: $1（-h 看帮助）" ;;
@@ -54,6 +59,47 @@ fi
 if ! sudo -n true 2>/dev/null; then
   die "无法免密码 sudo。请在能交互的终端先跑一次「sudo -v」缓存凭证，或为该用户配置 NOPASSWD 后重试。"
 fi
+
+# ── 国内镜像源（--cn）────────────────────────────────────────────────────────
+# 国内拉 GitHub/DockerHub/PyPI/conda 极慢，是安装慢的最大原因。--cn 一键把
+# apt / pip / conda / Docker / Miniconda 全切到国内镜像（清华 TUNA 等），下载快数倍。
+PIP_ARGS=""; CONDA_CN=0
+setup_mirrors() {
+  [ "$CN" -eq 1 ] || return 0
+  log "启用国内镜像源（apt / pip / conda / Docker）…"
+  # pip：全局 index-url（对本脚本所有 pip 调用生效）
+  export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  PIP_ARGS="-i https://pypi.tuna.tsinghua.edu.cn/simple"
+  CONDA_CN=1
+  # apt：换清华源（备份原文件，仅 Ubuntu）
+  if [ -f /etc/apt/sources.list ] && ! grep -q tuna /etc/apt/sources.list 2>/dev/null; then
+    codename="$(. /etc/os-release 2>/dev/null; echo "${UBUNTU_CODENAME:-jammy}")"
+    sudo cp /etc/apt/sources.list "/etc/apt/sources.list.eidon.bak" 2>/dev/null || true
+    sudo tee /etc/apt/sources.list >/dev/null <<EOF
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename} main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-updates main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-backports main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-security main restricted universe multiverse
+EOF
+    ok "apt 源 → 清华（备份在 /etc/apt/sources.list.eidon.bak）"
+  fi
+  ok "pip 源 → 清华"
+}
+# Docker registry 镜像加速器（在 docker 装好后调用）
+setup_docker_mirror() {
+  [ "$CN" -eq 1 ] || return 0
+  local f=/etc/docker/daemon.json
+  if [ -f "$f" ] && grep -q registry-mirrors "$f" 2>/dev/null; then return 0; fi
+  sudo mkdir -p /etc/docker
+  sudo tee "$f" >/dev/null <<'EOF'
+{
+  "registry-mirrors": ["https://docker.m.daocloud.io", "https://hub-mirror.c.163.com"]
+}
+EOF
+  sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
+  ok "Docker 镜像加速器已配置（daocloud / 163），HeyGem 30G 镜像会快很多"
+}
+setup_mirrors
 
 # ── 阶段 0：环境自检 ─────────────────────────────────────────────────────────
 if want preflight; then
@@ -107,12 +153,19 @@ if want docker; then
   step "2/6 安装 Docker + NVIDIA Container Toolkit"
   if ! command -v docker >/dev/null 2>&1; then
     log "安装 Docker Engine…"
-    curl -fsSL https://get.docker.com | sudo sh || die "Docker 安装失败，检查网络后重试：bash install-wsl-full.sh --only docker"
+    if [ "$CN" -eq 1 ]; then
+      curl -fsSL https://get.docker.com | sudo sh -s -- --mirror Aliyun \
+        || die "Docker 安装失败，检查网络后重试：bash install-wsl-full.sh --only docker --cn"
+    else
+      curl -fsSL https://get.docker.com | sudo sh \
+        || die "Docker 安装失败，检查网络后重试：bash install-wsl-full.sh --only docker"
+    fi
     sudo usermod -aG docker "$RUN_USER"
     warn "已把 $RUN_USER 加入 docker 组 —— 需要重新进 WSL 才免 sudo。本次运行仍会用 sudo 兜底。"
   else
     ok "Docker 已装：$(docker --version 2>/dev/null)"
   fi
+  setup_docker_mirror
   # docker 命令包装：当前 shell 可能还没拿到 docker 组权限
   DOCKER="docker"; docker ps >/dev/null 2>&1 || DOCKER="sudo docker"
 
@@ -143,7 +196,7 @@ if want eidon; then
     ok "eidon-backend 已在运行，跳过 setup.sh（如需重装：bash setup.sh）"
   else
     log "运行 setup.sh（装 ffmpeg+字体+Node+Nginx、建 venv、构建前端、systemd+nginx）…"
-    sudo bash "$ROOT/deploy/setup.sh" || die "setup.sh 失败，看上面报错。"
+    sudo EIDON_CN="$CN" bash "$ROOT/deploy/setup.sh" || die "setup.sh 失败，看上面报错。"
   fi
   # 健康检查
   for i in $(seq 1 20); do
@@ -234,13 +287,25 @@ if want cosyvoice && [ "$SKIP_COSY" -eq 0 ]; then
     if ! command -v conda >/dev/null 2>&1; then
       log "未检测到 conda，安装 Miniconda（pynini 必须用 conda 装）…"
       mc="$HOME_DIR/miniconda3"
-      curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/mc.sh \
+      if [ "$CN" -eq 1 ]; then
+        mc_url="https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+      else
+        mc_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+      fi
+      curl -fsSL "$mc_url" -o /tmp/mc.sh \
         && bash /tmp/mc.sh -b -p "$mc" \
         || { warn "Miniconda 安装失败。可跳过声音克隆继续：先用 --skip-cosyvoice 装其余部分，TTS 用免费 edge。"; ONLY="__skip__"; }
       export PATH="$mc/bin:$PATH"
     fi
     if command -v conda >/dev/null 2>&1; then
-      [ -d "$COSY_DIR/.git" ] || git clone --recursive https://github.com/FunAudioLLM/CosyVoice "$COSY_DIR" \
+      # 国内：conda 换清华 channel（pynini 走 conda-forge 镜像快很多）
+      if [ "$CONDA_CN" -eq 1 ]; then
+        conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/ 2>/dev/null || true
+        conda config --set show_channel_urls yes 2>/dev/null || true
+      fi
+      cosy_repo="https://github.com/FunAudioLLM/CosyVoice"
+      [ "$CN" -eq 1 ] && cosy_repo="https://gitclone.com/github.com/FunAudioLLM/CosyVoice"
+      [ -d "$COSY_DIR/.git" ] || git clone --recursive "$cosy_repo" "$COSY_DIR" \
         || warn "CosyVoice 克隆失败，稍后重试：bash install-wsl-full.sh --only cosyvoice"
       if [ -d "$COSY_DIR" ]; then
         log "建 conda 环境 + 装 pynini + 依赖（较慢）…"
@@ -248,7 +313,8 @@ if want cosyvoice && [ "$SKIP_COSY" -eq 0 ]; then
         conda env list | grep -q '^cosyvoice ' || conda create -n cosyvoice python=3.10 -y
         conda activate cosyvoice
         conda install -y -c conda-forge pynini==2.1.5 || warn "pynini 安装失败，CosyVoice 可能起不来。"
-        ( cd "$COSY_DIR" && pip install -q -r requirements.txt ) || warn "CosyVoice 依赖装不全，看上面报错。"
+        # pip：torch 等大包走 PIP_INDEX_URL（--cn 时已指向清华），显著加速
+        ( cd "$COSY_DIR" && pip install -q $PIP_ARGS -r requirements.txt ) || warn "CosyVoice 依赖装不全，看上面报错。"
         warn "CosyVoice 模型(CosyVoice2-0.5B)需手动下载后再起服务 —— 这步因模型体积大不自动跑。"
         warn "下模型并启动（在 cosyvoice 环境）："
         warn "  cd $COSY_DIR/runtime/python/fastapi"
