@@ -46,6 +46,7 @@ bash install-wsl-full.sh --only heygem     # 某阶段失败时单独重试
 - **国内网络务必加 `--cn`／`-Cn`**：一键把 apt / pip / conda / Docker registry / Miniconda 全切到国内镜像（清华、daocloud 等），这是缩短安装时间最有效的一招，通常能快数倍。
 - **HeyGem 那 30GB 是大头**：`--cn` 会配 Docker 镜像加速器；它在后台拉镜像时，Eidon 主程序（下载→转写→改写→免费 TTS→字幕）其实已经能用，可以先打开 `http://localhost/` 试前半段，数字人等镜像拉完再用。
 - **不需要声音克隆就 `--skip-cosyvoice`**：省掉 Miniconda + pynini + CosyVoice 依赖一整条（好几 GB + conda 编译）。
+- **给多台机器装 / 反复重装**：见 [README-Offline.md](README-Offline.md)——把 HeyGem 镜像、模型、Python 依赖在一台网络好的机器上预下成本地文件，拷到目标机直接用，安装时不再联网拉（下一次，拷 N 次）。
 
 > CosyVoice 的模型权重因为体积大（几个 G）不自动下载，脚本会在最后打印手动下载+启动命令（见第 4 步）。其余全自动。
 > 这两个脚本无法替你做的只有两件：**装 NVIDIA 驱动** 和 **`wsl --install` 后的那次重启**——其它都包了。
