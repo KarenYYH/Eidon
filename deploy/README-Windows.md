@@ -11,6 +11,40 @@
 
 ---
 
+## 🚀 快速通道（推荐：两个脚本，少手敲命令）
+
+不想照着下面 8 步手敲？用这两个脚本，大部分步骤自动化：
+
+**第 1 步（Windows）—— 装 WSL2 + 自动接力**
+先去 nvidia.com 装好显卡驱动（这步只能手动）。然后右键以**管理员身份**开 PowerShell：
+
+```powershell
+cd <项目所在目录>\Eidon\deploy
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\install-windows.ps1
+```
+
+它会：检测系统/显卡 → 装 WSL2+Ubuntu →（首次需重启，**重启后自动续跑**）→ 把项目放进 WSL → 自动调用第 2 步的脚本。一路 `y` + 回车即可。不要声音克隆就加 `-SkipCosyvoice`。
+
+**第 2 步（WSL 内）—— 后半段全自动**
+上面那个脚本会自动调它；你也可以单独在 WSL 里跑：
+
+```bash
+cd ~/Eidon/deploy
+bash install-wsl-full.sh                 # 全装（Docker→Eidon→HeyGem→CosyVoice→自检）
+bash install-wsl-full.sh --skip-cosyvoice  # 不要声音克隆（TTS 用免费 edge）
+bash install-wsl-full.sh --only heygem     # 某阶段失败时单独重试
+```
+
+它会：开 systemd → 装 Docker+NVIDIA Toolkit → 跑 `setup.sh` 部署 Eidon → 克隆并起 HeyGem（**自动注入容器卷映射，免手改 yml**）→ 引导 CosyVoice → 四件套自检。每阶段幂等可重跑，失败会告诉你卡在哪、贴哪条命令重试。
+
+> CosyVoice 的模型权重因为体积大（几个 G）不自动下载，脚本会在最后打印手动下载+启动命令（见第 4 步）。其余全自动。
+> 这两个脚本无法替你做的只有两件：**装 NVIDIA 驱动** 和 **`wsl --install` 后的那次重启**——其它都包了。
+
+下面的 8 步是完整手动流程 / 排错参考，按快速通道走顺了可不用逐条看。
+
+---
+
 ## 0. Windows 侧准备（只做一次）
 
 ### 0.1 装最新 NVIDIA 驱动
