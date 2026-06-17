@@ -40,6 +40,7 @@ bash install-wsl-full.sh --only heygem     # 某阶段失败时单独重试
 
 > CosyVoice 的模型权重因为体积大（几个 G）不自动下载，脚本会在最后打印手动下载+启动命令（见第 4 步）。其余全自动。
 > 这两个脚本无法替你做的只有两件：**装 NVIDIA 驱动** 和 **`wsl --install` 后的那次重启**——其它都包了。
+> `deploy/` 下的 `install-windows.ps1`、`install-wsl-full.sh`、`wsl-bootstrap.sh` 三个文件要放在一起（`install-windows.ps1` 靠同目录的 `wsl-bootstrap.sh` 在 WSL 里执行命令）。
 
 下面的 8 步是完整手动流程 / 排错参考，按快速通道走顺了可不用逐条看。
 

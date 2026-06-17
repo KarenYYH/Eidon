@@ -120,8 +120,15 @@ if (-not (Test-WslDistro)) {
 # ── 阶段 2：把项目放进 WSL + 验证 GPU 透传 ──────────────────────────────────
 Info "2/3 准备 WSL 内的项目与 GPU"
 
+# 把 WSL 侧助手脚本的路径转成 WSL 路径。之后所有复杂 shell 逻辑都走这个 .sh，
+# PowerShell 只用「bash <helper> <子命令> <简单参数>」调用，不再内联嵌套 shell。
+$helperWin = Join-Path (Split-Path -Parent $PSCommandPath) "wsl-bootstrap.sh"
+if (-not (Test-Path $helperWin)) { Die "缺少 wsl-bootstrap.sh（应与本脚本同目录）。" }
+$Helper = (wsl.exe -d $Distro -- wslpath -a "$helperWin" 2>$null | Select-Object -First 1).Trim()
+if (-not $Helper) { Die "无法把助手脚本路径转成 WSL 路径。" }
+
 # GPU 透传验证（在 WSL 里）
-$nv = wsl.exe -d $Distro -- bash -lc "command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | head -1" 2>$null
+$nv = (wsl.exe -d $Distro -- bash $Helper gpu 2>$null | Select-Object -First 1)
 if ($nv) { Ok "WSL 内 GPU 透传正常：$nv" }
 else {
   Warn "WSL 内 nvidia-smi 无输出 —— GPU 未透传。"
@@ -130,34 +137,36 @@ else {
 }
 
 # 把项目弄进 WSL 的 ~ 下（Linux 文件系统，避免 /mnt 慢）
-$wslUser = (wsl.exe -d $Distro -- bash -lc 'echo $USER' 2>$null | ForEach-Object { $_.Trim() } | Select-Object -First 1)
+$wslUser = (wsl.exe -d $Distro -- bash $Helper whoami 2>$null | Select-Object -First 1).Trim()
 $wslProj = "/home/$wslUser/Eidon"
-$exists  = wsl.exe -d $Distro -- bash -lc "test -f $wslProj/deploy/install-wsl-full.sh && echo yes" 2>$null
-if ($exists -match "yes") {
+$exists  = (wsl.exe -d $Distro -- bash $Helper has-project "$wslProj" 2>$null | Select-Object -First 1).Trim()
+if ($exists -eq "yes") {
   Ok "项目已在 WSL：$wslProj"
 } else {
-  # 优先 git clone；脚本所在的 Windows 目录若是完整仓库则改用拷贝
+  # 优先本地拷贝（脚本所在目录若是完整仓库）；否则 git clone
   $here = Split-Path -Parent (Split-Path -Parent $PSCommandPath)   # deploy 的上级
   if (Test-Path (Join-Path $here "backend\requirements.txt")) {
+    $wslSrc = (wsl.exe -d $Distro -- bash $Helper winpath "$here" 2>$null | Select-Object -First 1).Trim()
     Info "从本地拷贝项目进 WSL（$here → $wslProj）…"
-    $wslSrc = wsl.exe -d $Distro -- wslpath -a "$here" 2>$null | ForEach-Object { $_.Trim() } | Select-Object -First 1
-    wsl.exe -d $Distro -- bash -lc "cp -r '$wslSrc' '$wslProj' && echo copied" 2>$null | Out-Null
+    $r = (wsl.exe -d $Distro -- bash $Helper fetch copy "$wslSrc" "$wslProj" 2>&1 | Select-Object -Last 1).Trim()
   } else {
     Info "git clone 项目进 WSL（$RepoUrl）…"
-    wsl.exe -d $Distro -- bash -lc "command -v git >/dev/null || (sudo apt-get update -y && sudo apt-get install -y git); git clone $RepoUrl $wslProj"
+    $r = (wsl.exe -d $Distro -- bash $Helper fetch clone "$RepoUrl" "$wslProj" 2>&1 | Select-Object -Last 1).Trim()
   }
-  $exists = wsl.exe -d $Distro -- bash -lc "test -f $wslProj/deploy/install-wsl-full.sh && echo yes" 2>$null
-  if ($exists -notmatch "yes") { Die "项目未能放入 WSL（$wslProj）。可手动 git clone 后再跑 deploy/install-wsl-full.sh。" }
+  if ($r -notmatch "ok|exists") { Die "项目未能放入 WSL（$wslProj）。可手动 git clone 后再跑 deploy/install-wsl-full.sh。" }
   Ok "项目就位：$wslProj"
 }
 
 # ── 阶段 3：接力到 WSL 内一键脚本 ───────────────────────────────────────────
 Info "3/3 进入 WSL 跑后半段（Docker / Eidon / HeyGem / CosyVoice）"
-$flags = ""
-if ($SkipCosyvoice) { $flags = " --skip-cosyvoice" }
 Write-Host ""
 Write-Host "──────── 以下为 WSL 内安装输出 ────────" -ForegroundColor Cyan
-wsl.exe -d $Distro -- bash -lc "cd $wslProj/deploy && bash install-wsl-full.sh$flags"
+# 参数作为独立 argv 传给 helper 的 run 子命令，不拼 shell 字符串
+if ($SkipCosyvoice) {
+  wsl.exe -d $Distro -- bash $Helper run "$wslProj" --skip-cosyvoice
+} else {
+  wsl.exe -d $Distro -- bash $Helper run "$wslProj"
+}
 $code = $LASTEXITCODE
 
 Remove-Item $StateFile -ErrorAction SilentlyContinue
