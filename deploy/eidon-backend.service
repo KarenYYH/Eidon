@@ -1,0 +1,27 @@
+# Eidon 后端 systemd 服务单元
+# 安装：拷到 /etc/systemd/system/eidon-backend.service，按实际路径/用户改 <...>
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now eidon-backend
+#
+# 关键约束：任务队列是进程内内存单例 + 后台 asyncio worker，
+# 必须【单进程】运行。绝不可加 --workers N，否则任务会丢。
+
+[Unit]
+Description=Eidon backend (FastAPI, single process)
+After=network.target
+
+[Service]
+Type=simple
+User=<部署用户，如 ubuntu>
+WorkingDirectory=<项目路径>/Eidon/backend
+# venv 里的 uvicorn；单进程、单 worker
+ExecStart=<项目路径>/Eidon/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+# Whisper/torch 首次加载较慢，给足启动时间
+TimeoutStartSec=120
+# 让子进程（ffmpeg/yt-dlp/whisper 子脚本）能找到系统二进制
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target

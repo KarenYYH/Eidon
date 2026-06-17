@@ -1,0 +1,38 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ── Node / frontend ─────────────────────────────────────
+node_modules/
+frontend/dist/
+*.log
+npm-debug.log*
+
+# ── Secrets / config ────────────────────────────────────
+# .env holds API keys — never commit. .env.example is tracked.
+.env
+backend/.env
+
+# ── Runtime data & generated media ──────────────────────
+backend/temp/
+backend/outputs/
+backend/media/
+backend/bgm/
+backend/voices/
+backend/avatars/
+
+# ── OS / editor cruft ───────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*~
+
+# ── Scratch / one-off drivers (not part of the app) ─────
+backend/_e2e_*.py
+backend/_check_*.py
