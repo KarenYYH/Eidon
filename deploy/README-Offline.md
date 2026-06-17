@@ -6,6 +6,28 @@
 > 核心权衡：离线预置不减少总下载量，只是把下载**挪到一次、复用 N 次**。
 > 单机只装一次，用 `install-wsl-full.sh --cn`（国内镜像）通常就够，不必做离线包。
 
+## 一键打包：prepare-offline.sh（推荐）
+
+不想逐项手动准备？在**准备机**（联网、与目标机同架构/Python 版本，都用 WSL2 Ubuntu 22.04 最稳）跑：
+
+```bash
+cd Eidon/deploy
+bash prepare-offline.sh --cn             # 国内镜像下载，打包全部五项到 ./eidon-offline
+bash prepare-offline.sh --cn --out ~/pkg # 指定输出目录
+bash prepare-offline.sh --only models    # 只打某项：heygem|models|wheels|miniconda
+bash prepare-offline.sh --whisper medium # 指定 Whisper 模型大小（默认读 .env，没有则 small）
+```
+
+它会把下面五项下好、打成可拷贝的 `eidon-offline/` 目录（含 `MANIFEST.txt` 清单），
+拷到目标机后按本文档对应章节安装即可。每项可独立重跑，已存在默认跳过（`--force` 重做）。
+
+> 下面各章节是**手动准备**的细节 / 排错参考。用了上面的脚本就不必逐条手敲，
+> 但目标机**怎么用**这些本地文件，仍看各章节的「目标机」部分。
+
+---
+
+## 各项明细
+
 下面按**收益从大到小**排。每项都标了：在「准备机」做什么 → 拷什么 → 目标机怎么用。
 
 建议在准备机建一个目录统一放，例如 `eidon-offline/`，整体拷到目标机（U 盘/局域网/网盘）：
